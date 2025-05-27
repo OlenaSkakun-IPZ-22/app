@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 import csv
 import io
-import traceback # Import traceback
+import traceback 
 
 os.makedirs("logs", exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -31,21 +31,21 @@ def normalize_columns(columns):
     result = []
     for col in columns:
         col_str = str(col).lower().strip()
-        col_str = col_str.replace('\n', ' ').replace('\r', '').replace('  ', ' ') # Corrected multiple spaces
+        col_str = col_str.replace('\n', ' ').replace('\r', '').replace('  ', ' ') 
         matched = False
         for pattern, replacement in column_patterns.items():
             if re.search(pattern, col_str):
                 col_str = replacement
                 matched = True
                 break
-        result.append(col_str if matched else str(col).strip()) # Ensure original non-matched are also stripped
+        result.append(col_str if matched else str(col).strip()) 
     return result
 
 def make_columns_unique(cols):
     seen = {}
     result = []
     for col in cols:
-        col_name = str(col) # Ensure col is a string
+        col_name = str(col) 
         if col_name not in seen:
             seen[col_name] = 1
             result.append(col_name)
@@ -62,9 +62,9 @@ def find_best_header_row(df_raw, filename=""):
 
     if df_raw.empty:
         logging.warning(f"{filename}: df_raw is empty in find_best_header_row.")
-        return 0 # Default to first row if df is empty, though this should be handled before
+        return 0 
 
-    for idx, row in df_raw.head(20).iterrows(): # Check only top 20 rows for performance
+    for idx, row in df_raw.head(20).iterrows():
         try:
             match_count = sum(
                 1 for cell in row if isinstance(cell, str) and any(k in cell.lower() for k in header_keywords)
@@ -76,11 +76,9 @@ def find_best_header_row(df_raw, filename=""):
             logging.warning(f"{filename}: Error processing row {idx} in find_best_header_row: {e}")
             continue
 
-    if best_match_count >= 2: # Lowered threshold slightly, adjust as needed
+    if best_match_count >= 2: 
         logging.info(f"{filename}: Best header row found at index {best_header_idx} with {best_match_count} keyword matches.")
         return best_header_idx
-    
-    # Fallback: first row that is not entirely empty
     try:
         fallback_df = df_raw.dropna(how='all')
         if not fallback_df.empty:
@@ -101,8 +99,7 @@ def try_read_csv_with_encoding(file, filename, encodings=["utf-8", "ISO-8859-1",
         logging.info(f"{filename}: Attempting to read with encoding: {enc}")
         try:
             file.seek(0)
-            # Read a sample for sniffing, decode carefully
-            sample_bytes = file.read(4096) # Read a larger sample for sniffing
+            sample_bytes = file.read(4096) 
             if not sample_bytes:
                 logging.warning(f"{filename}: File is empty or unreadable (encoding {enc}).")
                 continue
@@ -116,15 +113,12 @@ def try_read_csv_with_encoding(file, filename, encodings=["utf-8", "ISO-8859-1",
             
             delimiters_to_try = []
             try:
-                # Sniff delimiter from the decoded sample
                 dialect = csv.Sniffer().sniff(sample_content)
                 detected_delimiter = dialect.delimiter
                 logging.info(f"{filename}: Sniffer detected delimiter '{detected_delimiter}' for encoding {enc}.")
                 delimiters_to_try.append(detected_delimiter)
             except csv.Error as sniff_error:
                 logging.warning(f"{filename}: CSV Sniffer failed for encoding {enc}: {sniff_error}. Will try common delimiters.")
-            
-            # Add common delimiters, ensuring no duplicates and prioritizing sniffed one
             for d in common_delimiters:
                 if d not in delimiters_to_try:
                     delimiters_to_try.append(d)
@@ -132,8 +126,7 @@ def try_read_csv_with_encoding(file, filename, encodings=["utf-8", "ISO-8859-1",
             for delim in delimiters_to_try:
                 logging.info(f"{filename}: Trying delimiter '{delim}' with encoding {enc}.")
                 try:
-                    file.seek(0) # Reset file pointer for full read
-                    # Read the entire file content with the current encoding
+                    file.seek(0) 
                     full_content_bytes = file.read()
                     full_content_str = ""
                     try:
@@ -155,10 +148,10 @@ def try_read_csv_with_encoding(file, filename, encodings=["utf-8", "ISO-8859-1",
                         logging.info(f"{filename}: Read with '{enc}','{delim}' resulted in empty or all-NaN DataFrame. Shape: {df.shape}. Trying next.")
                 except Exception as e:
                     logging.warning(f"{filename}: Error reading with delimiter '{delim}' and encoding {enc}: {e}")
-                    continue # Try next delimiter
+                    continue 
         except Exception as e:
             logging.warning(f"{filename}: General error with encoding {enc}: {e}")
-            continue # Try next encoding
+            continue 
             
     logging.error(f"{filename}: Failed to read CSV with all attempted encodings and delimiters.")
     return pd.DataFrame([{"error": f"Не вдалося прочитати CSV '{filename}' навіть з декількома кодуваннями та роздільниками."}])
@@ -172,7 +165,7 @@ def process_file_universal(file, filename):
         if ext == ".csv":
             df_raw = try_read_csv_with_encoding(file, filename)
         elif ext in [".xls", ".xlsx"]:
-            file.seek(0) # Ensure pointer is at the beginning for excel
+            file.seek(0)
             df_raw = pd.read_excel(file, header=None)
         else:
             return [{"error": f"{filename}: Unsupported file type '{ext}'"}]
@@ -186,8 +179,6 @@ def process_file_universal(file, filename):
             return [{"error": f"{filename}: файл порожній або не вдалося прочитати"}]
 
         logging.info(f"{filename}: Initial raw DataFrame shape: {df_raw.shape}")
-        # print(f"{filename}: df_raw head:\n{df_raw.head().to_string()}")
-
 
         header_idx = find_best_header_row(df_raw, filename)
         if header_idx >= len(df_raw):
@@ -200,8 +191,8 @@ def process_file_universal(file, filename):
         raw_header = [str(c).strip() for c in raw_header_series.fillna('').astype(str)]
         logging.info(f"{filename}: Raw header extracted: {raw_header}")
         
-        df = df_raw.iloc[header_idx + 1:].copy() # Data is everything after the header row
-        df.columns = raw_header # Assign the extracted header
+        df = df_raw.iloc[header_idx + 1:].copy() 
+        df.columns = raw_header 
         df.reset_index(drop=True, inplace=True)
 
         logging.info(f"{filename}: DataFrame shape after taking data below header: {df.shape}")
@@ -212,8 +203,6 @@ def process_file_universal(file, filename):
         df.columns = normalize_columns(df.columns)
         df.columns = make_columns_unique(df.columns)
         logging.info(f"{filename}: Normalized columns: {df.columns.tolist()}")
-
-        # Drop rows that are entirely empty
         logging.info(f"{filename}: Shape of df before final dropna of rows: {df.shape}")
 
         df.dropna(axis=0, how='all', inplace=True)
@@ -225,26 +214,22 @@ def process_file_universal(file, filename):
             return [{"error": f"{filename}: таблиця порожня після обробки"}]
 
         try:
-            for col in df.select_dtypes(include=['object']): # Only apply to object columns
-                if df[col].str.contains(',', na=False).any() and df[col].str.match(r'^\s*[\d,.]+\s*$', na=False).any() : # If column contains numbers with commas
+            for col in df.select_dtypes(include=['object']): 
+                if df[col].str.contains(',', na=False).any() and df[col].str.match(r'^\s*[\d,.]+\s*$', na=False).any() :
                     df[col] = df[col].str.replace(',', '.', regex=False)
         except Exception as e:
             logging.warning(f"{filename}: Error during global comma to dot replacement: {e}")
 
-
-        # Price column formatting
         for col_name in df.columns:
             if re.search(r'price(_\d+)?|regular|ht|ttc|\£|\€|\$', str(col_name).lower()):
                 try:
                     logging.info(f"{filename}: Processing price column: {col_name}")
-                    # Ensure the column exists after potential drops/renames
                     if col_name in df.columns:
                         series = df[col_name]
                         if series.ndim == 1:
                         
                             cleaned_series = series.astype(str).str.replace(r'[^\d.-]', '', regex=True)
-                            # Handle cases like '.. ' or '-' becoming NaN
-                            cleaned_series = cleaned_series.replace(r'^\.$|^\-$|^\s*$', pd.NA, regex=True) # Replace isolated dots/minuses/empty with NA
+                            cleaned_series = cleaned_series.replace(r'^\.$|^\-$|^\s*$', pd.NA, regex=True) 
                             df[col_name] = pd.to_numeric(cleaned_series, errors='coerce')
                             logging.info(f"{filename}: Price column {col_name} converted to numeric. NaNs: {df[col_name].isnull().sum()}")
                         else:
@@ -259,9 +244,15 @@ def process_file_universal(file, filename):
             if pd.isna(val):
                 return None
             return val
+        allowed_filters = set(column_patterns.values())
+        for param in request.args:
+            if param in df.columns and param in allowed_filters:
+                value = request.args.get(param).strip().lower()
+                if value:
+                    df = df[df[param].astype(str).str.lower().str.contains(value, na=False)]
+
 
         data = df.to_dict(orient='records')
-        # Apply json safe conversion to each cell
         safe_data = [{k: convert_to_json_safe(v) for k, v in row.items()} for row in data]
 
         logging.info(f"{filename}: Successfully processed. Returning {len(safe_data)} records.")
@@ -279,14 +270,13 @@ def upload_files():
         return jsonify({'error': 'Файли не надіслані'}), 400
 
     uploaded_files = request.files.getlist('files')
-    if not uploaded_files or not uploaded_files[0].filename : # Check if list is empty or first file has no name
+    if not uploaded_files or not uploaded_files[0].filename :
         return jsonify({'error': 'Список файлів порожній або файл без імені.'}), 400
         
     result = {}
     for file_storage in uploaded_files:
-        if file_storage and file_storage.filename: # Ensure file_storage is not None and has a filename
+        if file_storage and file_storage.filename:
             filename = file_storage.filename
-            # Pass the file stream (file_storage) directly
             result[filename] = process_file_universal(file_storage, filename)
         else:
             logging.warning("Received an empty file or file without a name in the list.")
