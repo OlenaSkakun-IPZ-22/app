@@ -7,6 +7,7 @@ from datetime import datetime
 import csv
 import io
 import traceback 
+import pdfplumber
 
 os.makedirs("logs", exist_ok=True)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -161,18 +162,33 @@ def process_file_universal(file, filename):
     logging.info(f"--- Processing file: {filename} ---")
     ext = os.path.splitext(filename)[1].lower()
     df_raw = None
+
     try:
         if ext == ".csv":
             df_raw = try_read_csv_with_encoding(file, filename)
         elif ext in [".xls", ".xlsx"]:
             file.seek(0)
             df_raw = pd.read_excel(file, header=None)
+        elif ext == ".pdf":
+            try:
+                file.seek(0)
+                with pdfplumber.open(file) as pdf:
+                    all_rows = []
+                    for page in pdf.pages:
+                        table = page.extract_table()
+                        if table:
+                            all_rows.extend(table)
+                if not all_rows or len(all_rows) < 2:
+                    return [{"error": f"{filename}: не вдалося знайти таблицю у PDF."}]
+                df_raw = pd.DataFrame(all_rows)
+            except Exception as e:
+                return [{"error": f"{filename}: помилка при зчитуванні PDF — {str(e)}"}]
         else:
             return [{"error": f"{filename}: Unsupported file type '{ext}'"}]
 
         if isinstance(df_raw, pd.DataFrame) and "error" in df_raw.columns and df_raw.shape[0] == 1:
-             logging.error(f"{filename}: try_read_csv_with_encoding returned an error: {df_raw.iloc[0]['error']}")
-             return df_raw.to_dict(orient='records')
+            logging.error(f"{filename}: try_read_csv_with_encoding returned an error: {df_raw.iloc[0]['error']}")
+            return df_raw.to_dict(orient='records')
 
         if df_raw is None or df_raw.empty:
             logging.error(f"{filename}: File is empty or could not be read into DataFrame.")
@@ -182,68 +198,48 @@ def process_file_universal(file, filename):
 
         header_idx = find_best_header_row(df_raw, filename)
         if header_idx >= len(df_raw):
-            logging.error(f"{filename}: Calculated header_idx {header_idx} is out of bounds for df_raw length {len(df_raw)}.")
-            return [{"error": f"{filename}: індекс заголовка ({header_idx}) виходить за межі таблиці ({len(df_raw)})"}]
-        
-        logging.info(f"{filename}: Identified header row index: {header_idx}")
+            logging.error(f"{filename}: Calculated header_idx {header_idx} is out of bounds.")
+            return [{"error": f"{filename}: індекс заголовка ({header_idx}) виходить за межі таблиці"}]
 
         raw_header_series = df_raw.iloc[header_idx]
         raw_header = [str(c).strip() for c in raw_header_series.fillna('').astype(str)]
-        logging.info(f"{filename}: Raw header extracted: {raw_header}")
-        
-        df = df_raw.iloc[header_idx + 1:].copy() 
-        df.columns = raw_header 
+        df = df_raw.iloc[header_idx + 1:].copy()
+        df.columns = raw_header
         df.reset_index(drop=True, inplace=True)
 
-        logging.info(f"{filename}: DataFrame shape after taking data below header: {df.shape}")
-
         df.dropna(axis=1, how='all', inplace=True)
-        logging.info(f"{filename}: DataFrame shape after dropping all-NaN columns: {df.shape}")
-
         df.columns = normalize_columns(df.columns)
         df.columns = make_columns_unique(df.columns)
-        logging.info(f"{filename}: Normalized columns: {df.columns.tolist()}")
-        logging.info(f"{filename}: Shape of df before final dropna of rows: {df.shape}")
-
         df.dropna(axis=0, how='all', inplace=True)
-        logging.info(f"{filename}: DataFrame shape after dropping all-NaN rows: {df.shape}")
-
 
         if df.empty:
             logging.error(f"{filename}: DataFrame is empty after processing.")
             return [{"error": f"{filename}: таблиця порожня після обробки"}]
 
+        # Кома в числах → крапка
         try:
-            for col in df.select_dtypes(include=['object']): 
-                if df[col].str.contains(',', na=False).any() and df[col].str.match(r'^\s*[\d,.]+\s*$', na=False).any() :
+            for col in df.select_dtypes(include=['object']):
+                if df[col].str.contains(',', na=False).any() and df[col].str.match(r'^\s*[\d,.]+\s*$', na=False).any():
                     df[col] = df[col].str.replace(',', '.', regex=False)
         except Exception as e:
-            logging.warning(f"{filename}: Error during global comma to dot replacement: {e}")
+            logging.warning(f"{filename}: Error during comma→dot conversion: {e}")
 
+        # Привести до чисел колонки з цінами
         for col_name in df.columns:
             if re.search(r'price(_\d+)?|regular|ht|ttc|\£|\€|\$', str(col_name).lower()):
                 try:
-                    logging.info(f"{filename}: Processing price column: {col_name}")
-                    if col_name in df.columns:
-                        series = df[col_name]
-                        if series.ndim == 1:
-                        
-                            cleaned_series = series.astype(str).str.replace(r'[^\d.-]', '', regex=True)
-                            cleaned_series = cleaned_series.replace(r'^\.$|^\-$|^\s*$', pd.NA, regex=True) 
-                            df[col_name] = pd.to_numeric(cleaned_series, errors='coerce')
-                            logging.info(f"{filename}: Price column {col_name} converted to numeric. NaNs: {df[col_name].isnull().sum()}")
-                        else:
-                            logging.warning(f"{filename}: Column '{col_name}' is not a Series (ndim={series.ndim}). Skipping price conversion.")
-                    else:
-                        logging.warning(f"{filename}: Price column '{col_name}' not found after column operations. Skipping.")
+                    series = df[col_name]
+                    if series.ndim == 1:
+                        cleaned_series = series.astype(str).str.replace(r'[^\d.-]', '', regex=True)
+                        cleaned_series = cleaned_series.replace(r'^\.$|^\-$|^\s*$', pd.NA, regex=True)
+                        df[col_name] = pd.to_numeric(cleaned_series, errors='coerce')
                 except Exception as e:
-                    logging.error(f"{filename}: Error processing price column '{col_name}': {e}\n{traceback.format_exc()}")
+                    logging.error(f"{filename}: Price column error ({col_name}): {e}")
 
-
+        # Фільтрація по query-параметрам
         def convert_to_json_safe(val):
-            if pd.isna(val):
-                return None
-            return val
+            return None if pd.isna(val) else val
+
         allowed_filters = set(column_patterns.values())
         for param in request.args:
             if param in df.columns and param in allowed_filters:
@@ -251,10 +247,8 @@ def process_file_universal(file, filename):
                 if value:
                     df = df[df[param].astype(str).str.lower().str.contains(value, na=False)]
 
-
         data = df.to_dict(orient='records')
         safe_data = [{k: convert_to_json_safe(v) for k, v in row.items()} for row in data]
-
         logging.info(f"{filename}: Successfully processed. Returning {len(safe_data)} records.")
         return safe_data
 
@@ -262,6 +256,7 @@ def process_file_universal(file, filename):
         tb_str = traceback.format_exc()
         logging.error(f"\n--- Critical Error: {datetime.now()} ---\nFile: {filename}\nError: {str(e)}\nTraceback:\n{tb_str}")
         return [{"error": f"{filename}: КРИТИЧНА ПОМИЛКА ОБРОБКИ - {str(e)}"}]
+
 
 
 @app.route('/upload', methods=['POST'])

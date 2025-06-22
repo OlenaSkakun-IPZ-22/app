@@ -23,10 +23,11 @@ st.set_page_config(page_title="Глобальний пошук у таблиця
 st.title(" Завантаження та глобальний пошук у таблицях")
 
 uploaded_files = st.file_uploader(
-    "Оберіть один або кілька файлів (.xlsx, .csv)",
-    type=["xlsx", "csv"],
+    "Оберіть один або кілька файлів (.xlsx, .csv, .pdf)",
+    type=["xlsx", "csv", "pdf"],
     accept_multiple_files=True
 )
+
 
 if "tables" not in st.session_state:
     st.session_state.tables = {}
@@ -36,7 +37,7 @@ if "last_uploaded_filenames" not in st.session_state:
 if uploaded_files:
     current_filenames = sorted([f.name for f in uploaded_files])
     if current_filenames != st.session_state.last_uploaded_filenames:
-        if st.button("📤 Надіслати файли на сервер", key="upload_button"):
+        if st.button(" Надіслати файли на сервер", key="upload_button"):
             with st.spinner("Обробка файлів..."):
                 files_for_request = [("files", (f.name, f.getvalue(), f.type)) for f in uploaded_files]
                 try:
