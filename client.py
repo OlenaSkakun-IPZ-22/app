@@ -40,7 +40,7 @@ if uploaded_files:
             with st.spinner("Обробка файлів..."):
                 files_for_request = [("files", (f.name, f.getvalue(), f.type)) for f in uploaded_files]
                 try:
-                    response = requests.post("https://назва-додатку.onrender.com/upload", files=files_for_request)
+                    response = requests.post("https://app-2-d1ekmp6uk2gs73aromug.onrender.com/upload", files=files_for_request)
                     
                     if response.status_code == 200:
                         results = response.json()
