@@ -36,12 +36,11 @@ if "last_uploaded_filenames" not in st.session_state:
 
 if uploaded_files:
     current_filenames = sorted([f.name for f in uploaded_files])
-    if current_filenames != st.session_state.last_uploaded_filenames:
-        if st.button(" Надіслати файли на сервер", key="upload_button"):
+    if st.button(" Надіслати файли на сервер", key="upload_button"):
             with st.spinner("Обробка файлів..."):
                 files_for_request = [("files", (f.name, f.getvalue(), f.type)) for f in uploaded_files]
                 try:
-                    response = requests.post("http://localhost:5000/upload", files=files_for_request)
+                    response = requests.post("https://mnefcnh4sfq6nwcyefyus4.streamlit.app/upload", files=files_for_request)
                     
                     if response.status_code == 200:
                         results = response.json()
